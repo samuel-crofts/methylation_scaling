@@ -1,5 +1,5 @@
 ---
-title: "Scaling analysis"
+title: "Regress and plot"
 output: html_document
 date: "08_05_2023"
 author: "Sam Crofts: sam.crofts@ed.ac.uk"
