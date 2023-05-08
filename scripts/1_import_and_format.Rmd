@@ -15,7 +15,7 @@ library(matrixStats)
 library(stats)
 library(DescTools)
 setwd("scripts")
-source("functions.R")
+source("../src/functions.R")
 ```
 
 ```{r import_and_wrangle_data}
