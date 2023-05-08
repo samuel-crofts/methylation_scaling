@@ -1,0 +1,221 @@
+---
+title: "Import and format data"
+output: html_document
+date: "08_05_2023"
+author: "Sam Crofts: sam.crofts@ed.ac.uk"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library("GEOquery") #package for dealing with files obtained from the Gene Expression Omnibus
+library("strex")
+library(matrixStats)
+library(stats)
+library(DescTools)
+setwd("scripts")
+source("functions.R")
+```
+
+```{r import_and_wrangle_data}
+
+###
+#Note: Unless otherwise stated, all methylation datasets and metadata referred to can be downloaded directly from GEO in
+#pre-processed form, usually via the "series matrix" file. These are then saved in a folder named "data".
+#Methylation data is in the form of tables in which rows refer CpGs, columns refer to samples, and values are beta values.
+#Metadata is the form of tables with the columns: sample_id, age, sex, tissue, organism.
+###
+
+###Organism lifespans and mass data###
+
+#Read in Supplementary Data Table 6
+lifespan_mass_df <- read.csv("../data/Supplementary Table 6.csv")
+
+###Bats methylation data (GSE164127)###
+
+# "series matrix" file
+bats_all <- getGEO(filename="../data/GSE164127_series_matrix_bat.txt", getGPL = FALSE)
+
+#extract the relevant bits
+bats_meth <- as.data.frame(bats_all@assayData$exprs)
+
+bats_metadata <- as.data.frame(cbind("sample_id"=bats_all@phenoData@data$geo_accession, "age"=bats_all@phenoData@data$`age (years):ch1`, "sex"=bats_all@phenoData@data$`Sex:ch1`, "tissue"=bats_all@phenoData@data$source_name_ch1, "organism"=bats_all@phenoData@data$organism_ch1))
+
+bats_metadata$age <- as.numeric(bats_metadata$age)
+bats_metadata$sex <- factor(bats_metadata$sex, levels=c("Male","Female"))
+
+###Beluga whale methylation data (GSE164465)###
+
+# "series matrix" file
+beluga_all <- getGEO(filename="../data/GSE164465_series_matrix_beluga.txt", getGPL = FALSE) 
+
+#extract the relevant bits
+beluga_meth <- as.data.frame(beluga_all@assayData$exprs)
+
+#Metadata seems to have been split over a few files, so need to do some manual wrangling: 
+
+#Some metadata taken from Table S1 of the original paper (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8127720/)
+beluga_metadata <- read.csv("../data/beluga_table_s1_metadata.csv")
+
+#Need to link "Sample 1" etc. with "GSM5011411" etc. So ID relationships have been put into an excel sheet "beluga_ids.csv", obtained from the GEO page (GSE164465)
+#E.g. row 1 is: "GSM5011411" "Sample1"
+beluga_ids <- read.csv("beluga_ids.csv", header=FALSE)
+beluga_ids$V2 <- str_before_nth(beluga_ids$V2, "\\.", 2)
+beluga_ids$V2 <- gsub("\\.","", beluga_ids$V2)  
+
+#Merge
+beluga_metadata <- merge(beluga_metadata, beluga_ids, by.x="GEO_GSE164465_SampleID", by.y="V2")
+
+#Format
+beluga_metadata$Sex <- ifelse(beluga_metadata$Sex=="m","Male","Female")
+colnames(beluga_metadata)[colnames(beluga_metadata) == 'V1'] <- 'sample_id'
+colnames(beluga_metadata)[colnames(beluga_metadata) == 'Age..estimated.tooth.'] <- 'age'
+colnames(beluga_metadata)[colnames(beluga_metadata) == 'Sex'] <- 'sex'
+
+#Still need some additional metadata, which we obtain from the "series matrix" file
+beluga_extra_meta <- as.data.frame(cbind("sample_id"=beluga_all@phenoData@data$geo_accession, organism =beluga_all@phenoData@data$`species common name:ch1`))
+
+beluga_metadata$tissue <- "Skin"
+beluga_metadata <- merge(beluga_metadata,beluga_extra_meta, by="sample_id")
+beluga_metadata <- dplyr::select(beluga_metadata, sample_id, age, sex, tissue, organism)
+
+###Marmot methylation data (GSE174544)###
+
+# "series matrix" file
+marmots_all <- getGEO(filename="../data/GSE174544_series_matrix_yellow_bellied_marmots.txt", getGPL = FALSE)
+
+#extract the relevant bits
+marmots_meth <- as.data.frame(marmots_all@assayData$exprs)
+
+#Some metadata obtained from Supplementary Data 1 downloaded from the original paper (https://www.nature.com/articles/s41559-022-01679-1#Sec14)
+marmots_metadata <- read.csv("../data/supp_table_1_marmots_metadata.csv")
+
+#Again need to wrangle metadata. Need to link "GSM5319185" etc. with "Sample1.Yellow-bellied marmot.203531420048_R01C01" etc. So ID relationships have been put into an excel sheet "marmots_ids.csv", obtained from the GEO page (GSE174544)
+#e.g. first row is: "GSM5319185"	"Sample1.Yellow-bellied marmot.203531420048_R01C01"
+
+marmots_ids <- read.csv("../data/marmots_ids.csv", header=FALSE)
+marmots_ids$V2 <- gsub("^.*\\.","", marmots_ids$V2)  
+
+#Merge
+marmots_metadata <- merge(marmots_metadata, marmots_ids, by.x="Basename", by.y="V2")
+
+#Format
+colnames(marmots_metadata)[colnames(marmots_metadata) == 'V1'] <- 'sample_id'
+colnames(marmots_metadata)[colnames(marmots_metadata) == 'Age'] <- 'age'
+marmots_metadata$tissue <- "Blood"
+marmots_metadata$organism <- "Marmota flaviventris"
+marmots_metadata$sex <- "Female"
+marmots_metadata <- dplyr::select(marmots_metadata, sample_id, age, sex, tissue, organism)
+
+###Mole rat methylation data (GSSE174777)###
+
+# "series matrix" file
+molerat_all <- getGEO(filename="../data/GSE174777_series_matrix_mole_rat_p1.txt", getGPL = FALSE)
+
+#extract the relevant bits
+molerat_meth <- as.data.frame(molerat_all@assayData$exprs)
+
+molerat_metadata <- as.data.frame(cbind("sample_id"=molerat_all@phenoData@data$geo_accession, "age"=molerat_all@phenoData@data$`age:ch1`, "sex"=molerat_all@phenoData@data$`Sex:ch1`,
+                                        tissue=molerat_all@phenoData@data$source_name_ch1, organism = molerat_all@phenoData@data$organism_ch1, queen=molerat_all@phenoData@data$`queen:ch1`))
+
+###Deer methylation data (GSE184216)###
+
+# "series matrix" file
+deer_all <- getGEO(filename="../data/GSE184216_series_matrix.txt", getGPL = FALSE)
+
+#extract the relevant bits
+deer_metadata <- as.data.frame(cbind("sample_id"=deer_all@phenoData@data$title, "age"=deer_all@phenoData@data$`age:ch1`, "sex"=deer_all@phenoData@data$`Sex:ch1`,
+                                     tissue=deer_all@phenoData@data$source_name_ch1, organism =deer_all@phenoData@data$organism_ch1))
+deer_metadata$sample_id <- gsub("^.*\\.","", deer_metadata$sample_id)
+deer_metadata$sample_id <- paste0("X", deer_metadata$sample_id)
+
+#methylation data downloaded separately in processed form at GSE184216 ("GSE184216_datBetaNormalized.csv.gz")
+deer_meth <- read.csv("data/GSE184216_datBetaNormalized_deer.csv")
+rownames(deer_meth) <- deer_meth[,1]
+deer_meth <- deer_meth[, -1] 
+
+###Zebra methylation data (GSE184223)###
+
+# "series matrix" file
+zebra_all <- getGEO(filename="../data/GSE184223_series_matrix_zebras.txt", getGPL = FALSE)
+
+#extract the relevant bits
+zebra_metadata <- as.data.frame(cbind("sample_id"=zebra_all@phenoData@data$title, "age"=zebra_all@phenoData@data$`age:ch1`, "sex"=zebra_all@phenoData@data$`Sex:ch1`, tissue=zebra_all@phenoData@data$source_name_ch1, organism = zebra_all@phenoData@data$organism_ch1))
+
+zebra_metadata$sample_id <- gsub("^.*\\.","", zebra_metadata$sample_id)  
+zebra_metadata$sample_id <- paste0("X", zebra_metadata$sample_id)
+
+#methylation data downloaded separately in processed form at GSE184223 ("GSE184223_datBetaNormalized.csv.gz")
+zebra_meth <- read.csv("../data/GSE184223_datBetaNormalized_zebras.csv")
+
+rownames(zebra_meth) <- zebra_meth[,1]
+zebra_meth <- zebra_meth[, -1] 
+
+###Humans (blood data) (GSE40279)###
+#Downloaded at GSE40279 and processed peviously as descirbed in https://www.biorxiv.org/content/10.1101/2023.03.01.530570v2
+human_meth <- read.csv("../data/human_blood_meth.csv", header=FALSE)
+human_metadata <- read.csv("../data/human_blood_metadata.csv")
+#Just keep the rows common to the mammalian array to save memory
+human_meth <- human_meth[rownames(beluga_meth),]
+
+###Humans (skin data)###
+#Taken from EWAS datahub Download page (https://ngdc.cncb.ac.cn/ewas/datahub/download) (“tissue_methylation_v1.zip” file and associated metadata). Filtered and put into the correct format previously.
+human_skin_meth <- read.csv("../data/human_skin_meth.csv", header=FALSE)
+human_skin_metadata <- read.csv("../data/human_skin_metadata.csv")
+
+###Chimpanzee methylation data (GSE136296)###
+
+# "series matrix" file
+chimps_all <- getGEO(filename="../data/GSE136296_series_matrix_chimps.txt", getGPL = FALSE)
+
+#extract the relevant bits
+chimps_metadata <- as.data.frame(cbind("sample_id"=chimps_all@phenoData@data$title, "age"=chimps_all@phenoData@data$`age:ch1`, "sex"=chimps_all@phenoData@data$`Sex:ch1`, tissue=chimps_all@phenoData@data$source_name_ch1, organism = chimps_all@phenoData@data$organism_ch1))
+
+#format
+chimps_metadata$tissue <- "Blood"
+chimps_metadata$sample_id <- gsub("-*","", chimps_metadata$sample_id)  
+chimps_metadata$sample_id <- paste0("X", chimps_metadata$sample_id)
+chimps_metadata$individual_id <- chimps_all@phenoData@data$title
+chimps_metadata$individual_id <- gsub("-.*","", chimps_metadata$individual_id, )
+chimps_metadata$sample_id <- gsub("\\*.","", chimps_metadata$sample_id, )
+
+#methylation data downloaded separately in processed form at GSE136296 ("GSE136296_eegoguevara_2019.08.23.data.meth.unmeth.pdet.csv.gz")
+chimps_meth <- read.csv("../data/GSE136296_eegoguevara.2019.08.23.data.beta.pdet-chimps.csv")
+
+#we only need the beta values
+chimps_meth <- chimps_meth %>% dplyr::select(-contains("detP"))
+colnames(chimps_meth)<- gsub("_beta","",colnames(chimps_meth))
+colnames(chimps_meth) <- gsub("\\.","",colnames(chimps_meth))
+rownames(chimps_meth) <- chimps_meth[,1]
+chimps_meth <- chimps_meth[, -1] 
+
+#there are a couple of samples that don't match up - remove these
+common_samples <- merge(as.data.frame(colnames(chimps_meth)),as.data.frame(chimps_metadata$sample_id), by.x="colnames(chimps_meth)",by.y="chimps_metadata$sample_id")
+chimps_meth <- chimps_meth[,common_samples$`colnames(chimps_meth)`]
+
+#just keep mammalian array cpgs to save memory
+chimps_meth <- chimps_meth[rownames(zebra_meth),]
+chimps_metadata <- filter(chimps_metadata, sample_id %in% common_samples$`colnames(chimps_meth)`)
+
+###Mouse methylation data (GSE80672)###
+
+#methylation data processed previously as described in https://www.biorxiv.org/content/10.1101/2023.01.13.524017v1
+mouse_meth <- read.csv("../data/mouse_meth_petkovich_all_mammalian_cpgs.csv", row.names=1)
+mouse_meth <- na.omit(mouse_meth)
+mouse_meth <- mouse_meth/100
+
+# "series matrix" file
+mouse_all <- getGEO(filename="../data/GSE80672_series_matrix.txt", getGPL = FALSE)
+
+#extract the relevant bits
+mouse_metadata <- as.data.frame(cbind("sample_id"=mouse_all@phenoData@data$geo_accession, "age"=mouse_all@phenoData@data$`age (years):ch1`, "sex"=mouse_all@phenoData@data$`gender:ch1`, tissue=mouse_all@phenoData@data$source_name_ch1, organism = mouse_all@phenoData@data$organism_ch1, treatment=mouse_all@phenoData@data$`diet:ch1`, genetic_condition=mouse_all@phenoData@data$`genetic condition:ch1`))
+
+#format
+mouse_metadata <- filter(mouse_metadata, tissue=="Whole Blood")
+mouse_metadata$tissue <- "Blood" 
+mouse_metadata$age <- as.numeric(mouse_metadata$age)/12
+mouse_metadata$sample_id %in% colnames(mouse_meth)
+mouse_metadata <- mouse_metadata[(mouse_metadata$sample_id %in% colnames(mouse_meth)),]
+
+```

@@ -1,0 +1,182 @@
+---
+title: "Scaling analysis"
+output: html_document
+date: "08_05_2023"
+author: "Sam Crofts: sam.crofts@ed.ac.uk"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(stringr)
+library("GEOquery") #package for dealing with files obtained from the Gene Expression Omnibus
+library("strex")
+library("ggplot2")
+library(matrixStats)
+library(stats)
+library(DescTools)
+library("ggrepel")
+setwd("scripts")
+source("functions.R")
+```
+
+```{r regressions}
+
+##Calculate slopes for each CpG in each dataset##
+
+##Blood##
+for (species_i in c("human", "marmots", "deer", "mouse", "molerat", "zebra", "chimps")) {
+  
+    meth_df <- get(paste0(species_i,"_meth"))
+    meta_df <- get(paste0(species_i,"_metadata"))
+
+    results_name <- paste0(species,"_results")
+    assign(results_name, calc_slopes(meth_df, meta_df, "Blood", rownames(meth_df)))
+    results_name$organism <- species_i
+  
+}
+
+##Skin##
+
+#First, filter bats down to those that have 15 or more samples
+bats_counts <- bats_metadata %>% group_by(organism) %>% summarise(n=n())
+bats_metadata <- filter(bats_metadata, organism %in% (bats_counts$organism[bats_counts$n>=15])) 
+
+#bats
+for (species_i in unique(bats_metadata$organism)) {
+    results_name <- paste0(species,"_results")
+    bats_meta_filt <- filter(bats_metadata, organism==species_i, !is.na(age))
+    assign(results_name, calc_slopes(bats_meth, bats_meta_filt, "Skin", rownames(bats_meth)))
+    results_name$organism <- species_i
+}
+
+#skin samples from organisms we have other results for
+for (species_i in c("Beluga_skin", "Zebra_skin", "Mole rat_skin", "Human_skin")) {
+    meth_df <- get(paste0(species_i,"_meth"))
+    meta_df <- get(paste0(species_i,"_metadata"))
+    results_name <- paste0(species_i,"_results")
+    assign(results_name, calc_slopes(meth_df, meta_df, "Skin", rownames(meth_df)))
+}
+
+```
+
+```{r filter_results_and_compare}
+all_orgs <- c("human", "marmots", "deer", "mouse", "molerat", "zebra", "chimps", "Beluga_skin", "Zebra_skin", "Mole rat_skin", "Human_skin", unique(bats_metadata$organism))
+
+r_thresh <- 0.1
+
+#Filtering the results to get only the age-associated CpGs for each organism - both increasing and decreasing
+for (org_i in all_orgs) {
+  results_name <- paste0(org_i,"_results")
+  results_df <- eval(as.symbol(results_name))
+  
+  #increasing CpGs
+  age_assoc_pos_name <- paste0(org_i,"_age_assoc_pos")
+  assign(age_assoc_pos_name, filter(df, r2_age>=r_thresh & sign(beta_est)==1))
+  
+  #Decreasing CpGs
+  age_assoc_neg_name <- paste0(org_i,"_age_assoc_neg")
+  assign(age_assoc_neg_name, filter(df, r2_age>=r_thresh & sign(beta_est)==-1))
+}
+ 
+#Blood baseline
+baseline_species <- "Zebras"
+
+#Skin baseline (un-comment if analysing skin instead of blood)
+#baseline_species <- "Eptesicus fuscus"
+
+baseline_results <- get(paste0(baseline_species,"_results"))
+baseline_age_assoc_pos <- get(paste0(baseline_species,"_age_assoc_pos"))
+baseline_age_assoc_neg <- get(paste0(baseline_species,"_age_assoc_neg"))
+
+results <- data.frame(species=character(), median_est=numeric(), num_cpgs=numeric(), p25=numeric(), p75=numeric()) #empty dataframe to populate
+
+#Skin (un-comment if analysing skin instead of blood)
+#for (species_i in c("Humans_skin", "Beluga_skin", "Eptesicus fuscus","Zebra_skin", unique(bats_metadata$organism))) {
+
+#Blood
+for (species_i in c("chimps", "mouse", "marmots", "molerats", "humans", "deer")) {
+
+  print(species_i)
+  
+  comparison_results <- get(paste0(species_i,"_results"))
+  comparison_age_assoc_pos <- get(paste0(species_i,"_age_assoc_pos"))
+  comparison_age_assoc_neg <- get(paste0(species_i,"_age_assoc_neg"))
+
+  #What age-related CpGs do the two species have in common?
+  common_age_cpgs_pos <- Reduce(intersect,list(baseline_age_assoc_pos$cpg, comparison_age_assoc_pos$cpg))
+  common_age_cpgs_neg <- Reduce(intersect,list(baseline_age_assoc_neg$cpg, comparison_age_assoc_neg$cpg))
+  combined_results <- list(baseline_results, comparison_results)
+  
+  #Filtering out the results to just these common CpGs
+  common_cpgs_pos <- filter_results(combined_results, common_age_cpgs_pos)
+  common_cpgs_neg <- filter_results(combined_results, common_age_cpgs_neg)
+  common_cpgs <- rbind(common_cpgs_pos, common_cpgs_neg)
+  common_cpgs$beta_est <- abs(common_cpgs$beta_est) #take absolute value of slopes
+  
+  #calculate the ratio of the slopes for each CpG
+  rates_df <- summarise_cpgs_comp_baseline(common_cpgs, baseline_species, species_i)
+  
+  #add to the results table
+  temp_results <- data.frame(species=species_i, median_est=MedianCI(rates_df$ratio)[1], num_cpgs=nrow(rates_df), p25=quantile(rates_df$ratio,0.25), p75=quantile(rates_df$ratio,0.75))
+  results <- rbind(results, temp_results)
+
+}
+
+#Add the baseline species into the results table
+temp_results <- data.frame(species=baseline_species, median_est=1, p25=1, p75=1, num_cpgs=NA)
+results <- rbind(results, temp_results)
+
+##Add in lifespan and mass data 
+results <- merge(results, lifespan_mass_df, by.x="species", by.y="species")
+
+```
+
+
+```{r plotting}
+
+#Log-log scale plot
+p<-ggplot(results, aes(x=log10(lifespan), y=log10(median_est), label=as.factor(species))) + geom_point(size=1.6) +
+  xlab("Log10(Maximum lifespan (years))") + ylab("Log10(Methylation rate ratio)") +   geom_smooth(method='lm', se=F, colour="black") +
+  geom_errorbar(aes(ymin=log10(results$p25), ymax=log10(results$p75)), width=.03, position=position_dodge(.9)) + 
+  theme_classic() + 
+  theme(text = element_text(size = 19))
+
+#Original scale plot
+p<-ggplot(results, aes(x=(lifespan), y=(median_est), label=as.factor(species))) + geom_point(size=1.6) +
+  xlab("Maximum lifespan (years)") + ylab("Methylation rate ratio") +
+  geom_function(fun = function(x) 10^1.57529*x^(-1.04048), colour = "black", xlim=c(3, 130)) + #values here need to be changed depending on the association seen in the log-log plot
+  theme_classic() + 
+  theme(text = element_text(size = 19)) +
+  #geom_function(fun = function(x) x^(-0.93)+1.23, colour = "red", xlim=c(0, 130)) +
+  geom_errorbar(aes(ymin=(results$p25), ymax=(results$p75)), width=.03)
+
+#Calculate slope of log-log plot
+age_model <- lm(log10(results$median_est)~(log10(results$lifespan)), data = NULL)
+summary(age_model)
+conf_ints <- confint(age_model, 'log10(results$lifespan)', level=0.95)
+
+
+###Plotting an individual CpG for blood data###
+
+cpg_i <- "cg00310215"
+
+#For each species, extract the methylation data for this particular CpG and put in a dataframe with the ages
+for (species_i in c("chimps", "mouse", "marmots", "molerats", "human", "deer", "zebra")) {
+  plot_data_name <- paste0(species,"_plot_data")
+  results_name$organism <- species_i
+  meth_df <- get(paste0(species_i, "_meth"))
+  meta_df <- get(paste0(species_i, "_metadata"))
+  assign(plot_data_name, make_plot_data(meth_df, meta_df, cpg_i, species_i))
+}
+
+#Put all together
+to_plot <- rbind(human_plot_data, zebra_plot_data, marmots_plot_data, chimps_plot_data,
+                   molerat_plot_data, mouse_plot_data, deer_plot_data)
+
+#Plot
+p <- ggplot(to_plot, aes(x=x, y=y, colour=as.factor(organism))) + geom_point(size=1.6) +
+  xlab("Age (years)") + ylab("Methylation proportion") +   geom_smooth(method='lm', se=F, aes(group=organism), fullrange=T) + labs(colour="Organism") + ylim(0,0.75) + xlim(0,110) +
+  theme_classic() + theme(text = element_text(size = 19)) +
+  guides(color="none") + ylim(c(0.25,0.8))
+```
