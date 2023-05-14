@@ -57,13 +57,25 @@ calc_slopes <- function(meth_df, meta_df, tissue_to_filt, cpgs) {
   #for each cpg
   for (i in cpgs) {
     
-    age_model <- lm(unlist(meth_df_filt[i,]) ~ as.numeric(meta_df_filt$age), data = NULL)   
-    sum_model <- summary(age_model)
-    r2_age <- sum_model$adj.r.squared
-    beta_est <- sum_model$coefficients[2,1]
-    beta_p <- sum_model$coefficients[2,4]
-    beta_low <- confint(age_model)[2,1]
-    beta_high <- confint(age_model)[2,2]
+    #if there are multiple measurements for some indivuduals, use a mixed-effects model with indivual_id as random effects. 
+    #Otherwise, simple linear regression:
+    if (any(names(meta_df_filt)=="individual_id")) {
+      age_model <- lmer(unlist(meth_df_filt[i,]) ~ as.numeric(meta_df_filt$age) + (1|meta_df_filt$individual_id), data = NULL)  
+      r2_age <- r.squaredGLMM(age_model)[1]
+      sum_model <- summary(age_model)
+      beta_est <- sum_model$coefficients[2,1]
+      beta_p <- sum_model$coefficients[2,5]
+      beta_low <- NA
+      beta_high <- NA
+    } else {
+      age_model <- lm(unlist(meth_df_filt[i,]) ~ as.numeric(meta_df_filt$age), data = NULL)   
+      sum_model <- summary(age_model)
+      r2_age <- sum_model$adj.r.squared
+      beta_est <- sum_model$coefficients[2,1]
+      beta_p <- sum_model$coefficients[2,4]
+      beta_low <- confint(age_model)[2,1]
+      beta_high <- confint(age_model)[2,2]
+    }
     
     #let's populate a dataframe with this info
     new_row <- data.frame(cpg=i, r2_age = r2_age, beta_est=beta_est, beta_low=beta_low, beta_high=beta_high, beta_p=beta_p)
