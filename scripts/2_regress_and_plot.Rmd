@@ -16,6 +16,8 @@ library(matrixStats)
 library(stats)
 library(DescTools)
 library("ggrepel")
+library(lme4)
+library(lmerTest)
 setwd("scripts")
 source("functions.R")
 ```
