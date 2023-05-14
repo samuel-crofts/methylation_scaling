@@ -15,7 +15,7 @@ library(matrixStats)
 library(stats)
 library(DescTools)
 setwd("scripts")
-source("../src/functions.R")
+source("functions.R")
 ```
 
 ```{r import_and_wrangle_data}
@@ -106,7 +106,18 @@ colnames(marmots_metadata)[colnames(marmots_metadata) == 'Age'] <- 'age'
 marmots_metadata$tissue <- "Blood"
 marmots_metadata$organism <- "Marmota flaviventris"
 marmots_metadata$sex <- "Female"
-marmots_metadata <- dplyr::select(marmots_metadata, sample_id, age, sex, tissue, organism)
+marmots_metadata <- read.csv("/Volumes/My Passport/Large Unimportant Data/Methylation Modelling Data/processed/marmots_metadata.csv")
+
+marmots_metadata <- merge(marmots_metadata, marmots_ids, by.x="Basename", by.y="V2")
+
+colnames(marmots_metadata)[colnames(marmots_metadata) == 'V1'] <- 'sample_id'
+colnames(marmots_metadata)[colnames(marmots_metadata) == 'Age'] <- 'age'
+
+marmots_metadata$tissue <- "Blood"
+marmots_metadata$organism <- "Marmota flaviventris"
+marmots_metadata$sex <- "Female"
+marmots_metadata$individual_id <- marmots_metadata$AnimalID
+marmots_metadata <- dplyr::select(marmots_metadata, sample_id, age, sex, tissue, organism, individual_id)
 
 ###Mole rat methylation data (GSSE174777)###
 
